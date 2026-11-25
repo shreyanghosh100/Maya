@@ -6,32 +6,34 @@ on:
   workflow_dispatch:
 
 env:
-  # Google Drive FOLDER ID of your Maya folder (see instructions)
   PROJECT_FOLDER_ID: "1CSgGOVhjzDlzWUkWZbj0bXnvbaw82_4t"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+
     steps:
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
 
-      - uses: actions/setup-java@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y git zip unzip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev
+          sudo apt-get install -y git zip unzip autoconf automake libtool libltdl-dev pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev
           pip install buildozer cython gdown
 
       - name: Download project folder from Google Drive
@@ -48,12 +50,15 @@ jobs:
         run: |
           ls -la
           chmod +x Ai/llama-server
+
           for f in main.py server1.py server2.py buildozer.spec; do
             test -f "$f" || { echo "MISSING: $f"; exit 1; }
           done
+
           for f in Ai_model.gguf llama-server libllama-server-impl.so libllama-common.so.0 libmtmd.so.0 libllama.so.0 libggml.so.0 libggml-cpu.so.0 libggml-base.so.0 libssl.so.3 libcrypto.so.3 libc++_shared.so; do
             test -f "Ai/$f" || { echo "MISSING: Ai/$f"; exit 1; }
           done
+
           echo "All files present"
 
       - name: Fix line endings
@@ -66,7 +71,7 @@ jobs:
           path: |
             ~/.buildozer
             ${{ env.APP }}/.buildozer
-          key: buildozer-${{ runner.os }}-v1
+          key: buildozer-${{ runner.os }}-v2
 
       - name: Build APK
         working-directory: ${{ env.APP }}
@@ -78,4 +83,3 @@ jobs:
           name: Maya-apk
           path: ${{ env.APP }}/bin/*.apk
           compression-level: 0
-          
