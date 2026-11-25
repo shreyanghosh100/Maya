@@ -1,4 +1,6 @@
+
 name: Build Maya APK
+
 on:
   push:
     branches:
@@ -51,16 +53,21 @@ jobs:
           find drive_files -maxdepth 3 -type f | head -n 100
 
       - name: Find the project folder
+        id: project
         run: |
           set -euo pipefail
-          SPEC=$(find drive_files -name buildozer.spec | head -n 1)
+          SPEC=$(find drive_files -name buildozer.spec -print -quit)
+
           if [ -z "$SPEC" ]; then
             echo "buildozer.spec was not found in the Drive folder" >&2
             exit 1
           fi
-          echo "APP_DIR=$(dirname "$SPEC")" >> "$GITHUB_ENV"
 
-      - name: Cache Android SDK/NDK and signing key
+          APP_DIR="$(dirname "$SPEC")"
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          echo "app_dir=$APP_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Android SDK/NDK
         uses: actions/cache@v4
         with:
           path: |
@@ -69,11 +76,11 @@ jobs:
           key: buildozer-${{ runner.os }}-v1
 
       - name: Build the APK
-  working-directory: ${{ env.APP_DIR }}
-  run: |
-    set -euo pipefail
-    buildozer -v android debug
-    ls -lah bin/*.apk
+        working-directory: ${{ steps.project.outputs.app_dir }}
+        run: |
+          set -euo pipefail
+          buildozer -v android debug
+          ls -lah bin/*.apk
 
       - name: Copy the APK into the repo
         run: |
@@ -81,23 +88,27 @@ jobs:
           mkdir -p apk
           rm -f apk/*.apk
           cp "$APP_DIR"/bin/*.apk apk/
-          ls -la apk
+          ls -lah apk
 
       - name: Upload the APK as an artifact
         uses: actions/upload-artifact@v4
         with:
           name: maya-apk
           path: apk/*.apk
+          if-no-files-found: error
 
       - name: Commit the APK to the repo
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add apk/
+
           if git diff --cached --quiet; then
             echo "APK is unchanged, nothing to commit."
           else
             git commit -m "Build Maya APK [skip ci]"
             git push
           fi
+          
