@@ -69,11 +69,11 @@ jobs:
           key: buildozer-${{ runner.os }}-v1
 
       - name: Build the APK
-        working-directory: ${{ env.APP_DIR }}
-        run: |
-          set -euo pipefail
-          yes | buildozer -v android debug
-          ls -la bin
+  working-directory: ${{ env.APP_DIR }}
+  run: |
+    set -euo pipefail
+    buildozer -v android debug
+    ls -lah bin/*.apk
 
       - name: Copy the APK into the repo
         run: |
