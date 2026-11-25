@@ -1,85 +1,101 @@
 name: Build Maya APK
 
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
-  PROJECT_FOLDER_ID: "1CSgGOVhjzDlzWUkWZbj0bXnvbaw82_4t"
+  DRIVE_FOLDER_URL: https://drive.google.com/drive/folders/1CSgGOVhjzDlzWUkWZbj0bXnvbaw82_4t
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
 
     steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
+      - name: Check out repo
+        uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install build tools
+      - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y git zip unzip autoconf automake libtool libltdl-dev pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev
-          pip install buildozer cython gdown
+          sudo apt-get install -y git zip unzip autoconf automake libtool \
+            pkg-config zlib1g-dev libncurses-dev cmake libffi-dev libssl-dev \
+            libltdl-dev build-essential ccache
 
-      - name: Download project folder from Google Drive
+      - name: Install Buildozer and gdown
         run: |
-          gdown --folder "https://drive.google.com/drive/folders/${PROJECT_FOLDER_ID}" -O "$HOME/dl"
-          SPEC=$(find "$HOME/dl" -name buildozer.spec | head -1)
-          test -n "$SPEC" || { echo "buildozer.spec not found in Drive folder"; find "$HOME/dl" | head -50; exit 1; }
-          mv "$(dirname "$SPEC")" "$HOME/app"
-          echo "APP=$HOME/app" >> "$GITHUB_ENV"
-          du -sh "$HOME/app"
+          python -m pip install --upgrade pip
+          pip install --upgrade buildozer cython virtualenv gdown
 
-      - name: Check project files
-        working-directory: ${{ env.APP }}
+      - name: Download the app files from Google Drive
         run: |
-          ls -la
-          chmod +x Ai/llama-server
+          set -euo pipefail
+          rm -rf drive_files
+          gdown --folder "$DRIVE_FOLDER_URL" -O drive_files
+          find drive_files -maxdepth 3 -type f | head -n 100
 
-          for f in main.py server1.py server2.py buildozer.spec; do
-            test -f "$f" || { echo "MISSING: $f"; exit 1; }
-          done
+      - name: Find the project folder
+        run: |
+          set -euo pipefail
+          SPEC=$(find drive_files -name buildozer.spec | head -n 1)
+          if [ -z "$SPEC" ]; then
+            echo "buildozer.spec was not found in the Drive folder" >&2
+            exit 1
+          fi
+          echo "APP_DIR=$(dirname "$SPEC")" >> "$GITHUB_ENV"
 
-          for f in Ai_model.gguf llama-server libllama-server-impl.so libllama-common.so.0 libmtmd.so.0 libllama.so.0 libggml.so.0 libggml-cpu.so.0 libggml-base.so.0 libssl.so.3 libcrypto.so.3 libc++_shared.so; do
-            test -f "Ai/$f" || { echo "MISSING: Ai/$f"; exit 1; }
-          done
-
-          echo "All files present"
-
-      - name: Fix line endings
-        working-directory: ${{ env.APP }}
-        run: sed -i 's/\r$//' buildozer.spec *.py
-
-      - name: Cache Buildozer downloads
+      - name: Cache Android SDK/NDK and signing key
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
-            ${{ env.APP }}/.buildozer
-          key: buildozer-${{ runner.os }}-v2
+            ~/.android
+          key: buildozer-${{ runner.os }}-v1
 
-      - name: Build APK
-        working-directory: ${{ env.APP }}
-        run: buildozer -v android debug
+      - name: Build the APK
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          set -euo pipefail
+          yes | buildozer -v android debug
+          ls -la bin
 
-      - name: Upload APK
+      - name: Copy the APK into the repo
+        run: |
+          set -euo pipefail
+          mkdir -p apk
+          rm -f apk/*.apk
+          cp "$APP_DIR"/bin/*.apk apk/
+          ls -la apk
+
+      - name: Upload the APK as an artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Maya-apk
-          path: ${{ env.APP }}/bin/*.apk
-          compression-level: 0
+          name: maya-apk
+          path: apk/*.apk
+
+      - name: Commit the APK to the repo
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apk/
+          if git diff --cached --quiet; then
+            echo "APK is unchanged, nothing to commit."
+          else
+            git commit -m "Build Maya APK [skip ci]"
+            git push
+          fi
