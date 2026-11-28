@@ -56,16 +56,20 @@ jobs:
         id: project
         run: |
           set -euo pipefail
+
           SPEC=$(find drive_files -name buildozer.spec -print -quit)
 
           if [ -z "$SPEC" ]; then
-            echo "buildozer.spec was not found in the Drive folder" >&2
+            echo "ERROR: buildozer.spec was not found in Google Drive." >&2
             exit 1
           fi
 
           APP_DIR="$(dirname "$SPEC")"
+
           echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
           echo "app_dir=$APP_DIR" >> "$GITHUB_OUTPUT"
+
+          echo "Project folder: $APP_DIR"
 
       - name: Cache Android SDK/NDK
         uses: actions/cache@v4
@@ -79,27 +83,50 @@ jobs:
         working-directory: ${{ steps.project.outputs.app_dir }}
         run: |
           set -euo pipefail
+
           buildozer -v android debug
+
           ls -lah bin/*.apk
 
       - name: Copy the APK into the repo
         run: |
           set -euo pipefail
+
           mkdir -p apk
           rm -f apk/*.apk
+
           cp "$APP_DIR"/bin/*.apk apk/
+
           ls -lah apk
 
-      - name: Upload the APK as an artifact
+      - name: Publish APK to GitHub Release
+        id: release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          TAG="build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+
+          gh release create "$TAG" apk/*.apk \
+            --title "Maya AI" \
+            --notes "Automated Maya APK build" \
+            --target "$GITHUB_SHA"
+
+      - name: Upload APK as fallback artifact
+        if: steps.release.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: maya-apk
+          name: maya-apk-fallback
           path: apk/*.apk
           if-no-files-found: error
+          retention-days: 30
 
       - name: Commit the APK to the repo
         run: |
           set -euo pipefail
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
